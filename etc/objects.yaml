@@ -1,0 +1,7 @@
+---
+Dummy:
+  id1:
+    filenames:
+      - /var/tmp/whatever.log
+      - /tmp/whatever.log
+      - /var/tmp/whatever2.log

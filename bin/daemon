@@ -1,0 +1,110 @@
+#!/usr/bin/env perl
+
+use v5.22;
+use feature 'postderef' ; no warnings 'experimental::postderef';
+
+# we will add to our @INC the lib and the local (carton) paths
+use File::Basename;
+use File::Spec;
+use lib File::Spec->catdir( File::Spec->catdir( File::Spec->rel2abs( dirname( $0 ) ) , File::Spec->updir() ) , 'lib' ) ;
+use lib File::Spec->catdir( File::Spec->catdir( File::Spec->rel2abs( dirname( $0 ) ) , File::Spec->updir() ) , 'local' , 'lib', 'perl5' ) ;
+my $dist_dir = File::Spec->catdir( File::Spec->rel2abs( dirname( $0 ) ) , File::Spec->updir() );
+my $etc_dir = File::Spec->catdir( File::Spec->rel2abs( dirname( $0 ) ) , File::Spec->updir() , 'etc' );
+
+
+#load our required modules
+use AnyEvent;
+use Module::Find;
+use Module::Load;
+use Data::Printer;
+use Log::Log4perl;
+use Scalar::Util;
+use Errno;
+use YAML qw(LoadFile);
+use Try::Tiny;
+
+#get a logger
+Log::Log4perl::init_and_watch( File::Spec->catdir( $etc_dir , 'daemon.logger' ) );
+my $logger = Log::Log4perl->get_logger;
+
+$logger->info('logger active');
+
+#internal tick rate of the daemon
+my $interval = 180;
+my $conf_file = File::Spec->catdir( $etc_dir , 'objects.yaml' );
+
+my $objects;
+
+# quit condition variable
+my $quit = AnyEvent->condvar;
+
+# handle TERM and INT signals
+my $quiter = sub {
+	local $SIG{ TERM } = 'IGNORE';
+	local $SIG{ INT  } = 'IGNORE';
+	$quit->send
+};
+$SIG{ INT  } = $quiter;
+$SIG{ TERM } = $quiter;
+
+my $tick = AnyEvent->timer (
+	after => 0.1,
+	interval => $interval,
+	cb => sub {
+		$logger->debug('tick');
+		my $conf = load_config( $conf_file );
+		parse_config( $conf ) if defined($conf);
+		#my @found = findsubmod 'Daemon::Plugin';
+		#p @found;
+		#for( @found ) {
+		#	load $_
+		#}
+
+	}
+);
+
+sub parse_config {
+	my $conf = shift // die 'incorrect call';
+	$objects = {};
+	for my $module ( keys $conf->%* ){
+		$logger->debug("Module $module");
+		my $package = 'Daemon::Plugin::'.$module;
+		load $package;
+		for my $id ( keys $conf->{ $module }->%* ) {
+			$logger->info("creating object $id");
+			my $obj = $package->new( $conf->{ $module }->{ $id } );
+			$objects->{ $obj } = $obj;
+		}
+	}
+}
+
+sub load_config {
+	my $conf_file = shift // die 'incorrect call';
+	if( ! -e $conf_file ) {
+		$logger->error("file $conf_file does not exist");
+		$quit->send;
+		return
+	}
+
+	state $previous_last_mod;
+	my $last_mod = (stat($conf_file))[9];
+	if ( $last_mod == $previous_last_mod ) {
+		$logger->debug("file $conf_file unchanged");
+		return
+	}
+	$logger->info("reloading file $conf_file");
+
+	my $conf = try { LoadFile($conf_file) } catch {
+		$logger->error("cannot YAML::LoadFile file $conf_file: $_");
+		$quit->send;
+	};
+	$conf // return;
+
+	$logger->debug(scalar(p($conf)));
+	$previous_last_mod = $last_mod;
+	return $conf
+}
+
+$quit->recv;
+say 'told to quit...';
+

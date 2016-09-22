@@ -1,7 +1,8 @@
 ---
-Dummy:
+Tail:
   id1:
     filenames:
-      - /var/tmp/whatever.log
-      - /tmp/whatever.log
-      - /var/tmp/whatever2.log
+      - /var/log/subscriber.log
+RedisPublisher:
+  id2: {}
+

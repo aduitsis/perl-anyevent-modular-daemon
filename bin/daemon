@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 
-use v5.22;
+use v5.20;
 use feature 'postderef' ; no warnings 'experimental::postderef';
 
 # we will add to our @INC the lib and the local (carton) paths
@@ -30,10 +30,17 @@ my $logger = Log::Log4perl->get_logger;
 $logger->info('logger active');
 
 #internal tick rate of the daemon
-my $interval = 180;
+my $interval = 10;
 my $conf_file = File::Spec->catdir( $etc_dir , 'objects.yaml' );
 
 my $objects;
+
+sub dispatch {
+	my $id = shift // die 'missing id to dispatch message to';
+	my $function = shift // die 'empty function name to use as dispatcher';
+	$logger->debug("sending $function message to $id");
+	$objects->{ $id }->$function( @_ );
+}
 
 # quit condition variable
 my $quit = AnyEvent->condvar;
@@ -47,6 +54,7 @@ my $quiter = sub {
 $SIG{ INT  } = $quiter;
 $SIG{ TERM } = $quiter;
 
+
 my $tick = AnyEvent->timer (
 	after => 0.1,
 	interval => $interval,
@@ -59,9 +67,10 @@ my $tick = AnyEvent->timer (
 		#for( @found ) {
 		#	load $_
 		#}
-
 	}
 );
+
+
 
 sub parse_config {
 	my $conf = shift // die 'incorrect call';
@@ -72,8 +81,10 @@ sub parse_config {
 		load $package;
 		for my $id ( keys $conf->{ $module }->%* ) {
 			$logger->info("creating object $id");
-			my $obj = $package->new( $conf->{ $module }->{ $id } );
-			$objects->{ $obj } = $obj;
+			my $args = $conf->{ $module }->{ $id };
+			$args->{ dispatch } = \&dispatch;
+			my $obj = $package->new( $args );
+			$objects->{ $id } = $obj;
 		}
 	}
 }

@@ -1,6 +1,6 @@
-package Daemon::Plugin::Dummy;
+package Daemon::Plugin::Tail;
 
-use v5.22;
+use v5.20;
 use feature 'postderef' ; no warnings 'experimental::postderef';
 use autodie;
 
@@ -13,13 +13,14 @@ use File::Spec;
 use Array::Utils qw(unique);
 use Fcntl;
 
+with 'Daemon::Plugin';
+
 my $logger = Log::Log4perl::get_logger();
 
 has 'filenames' => (
 	is	=> 'ro',
 	isa	=> 'ArrayRef[Str]',
 );
-
 
 has 'callback' => (
 	is	=> 'ro',
@@ -33,13 +34,24 @@ has filehandles => (
 	default	=> sub { {} },
 );
 
+
 sub filehandle {
 	open my $fh, '-|','tail -F -n0 -q '.$_[0]->filename;
 	return $fh
 }
 
 sub get_unique_directories {
-	unique map { File::Spec->rel2abs( dirname( $_ ) ) } $_[0]->filenames->@*
+	#unique map { File::Spec->rel2abs( dirname( $_ ) ) } $_[0]->filenames->@*
+	if( $^O eq 'linux' ) {
+		return unique map { File::Spec->rel2abs( dirname( $_ ) ) } $_[0]->filenames->@*
+	}
+	elsif( $^O eq 'freebsd' ) {
+		return unique map { File::Spec->rel2abs(  $_ ) } $_[0]->filenames->@*
+	}
+	else {
+		$logger->fatal("Warning, this module does not support $^O yet");
+		die;
+	}
 }
 
 my %size;
@@ -99,6 +111,7 @@ sub read_file {
 			else {
 				chomp($line);
 				$logger->debug("line read: $line");
+				$self->dispatch->('id2','receive',$line);
 			}
 		}
 	}

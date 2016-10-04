@@ -30,7 +30,7 @@ my $logger = Log::Log4perl->get_logger;
 $logger->info('logger active');
 
 #internal tick rate of the daemon
-my $interval = 10;
+my $interval = 300;
 my $conf_file = File::Spec->catdir( $etc_dir , 'objects.yaml' );
 
 my $objects;
@@ -38,7 +38,7 @@ my $objects;
 sub dispatch {
 	my $id = shift // die 'missing id to dispatch message to';
 	my $function = shift // die 'empty function name to use as dispatcher';
-	$logger->debug("sending $function message to $id");
+	$logger->trace("sending $function message to $id");
 	$objects->{ $id }->$function( @_ );
 }
 
@@ -59,14 +59,9 @@ my $tick = AnyEvent->timer (
 	after => 0.1,
 	interval => $interval,
 	cb => sub {
-		$logger->debug('tick');
+		$logger->trace('trying conf reload');
 		my $conf = load_config( $conf_file );
 		parse_config( $conf ) if defined($conf);
-		#my @found = findsubmod 'Daemon::Plugin';
-		#p @found;
-		#for( @found ) {
-		#	load $_
-		#}
 	}
 );
 
@@ -83,6 +78,7 @@ sub parse_config {
 			$logger->info("creating object $id");
 			my $args = $conf->{ $module }->{ $id };
 			$args->{ dispatch } = \&dispatch;
+			$args->{ id } = $id;
 			my $obj = $package->new( $args );
 			$objects->{ $id } = $obj;
 		}
@@ -100,22 +96,22 @@ sub load_config {
 	state $previous_last_mod;
 	my $last_mod = (stat($conf_file))[9];
 	if ( $last_mod == $previous_last_mod ) {
-		$logger->debug("file $conf_file unchanged");
+		$logger->trace("file $conf_file unchanged");
 		return
 	}
-	$logger->info("reloading file $conf_file");
+	$logger->info("change detected...reloading file $conf_file");
 
 	my $conf = try { LoadFile($conf_file) } catch {
-		$logger->error("cannot YAML::LoadFile file $conf_file: $_");
+		$logger->error("cannot YAML::LoadFile $conf_file: $_");
 		$quit->send;
 	};
 	$conf // return;
 
-	$logger->debug(scalar(p($conf)));
+	$logger->debug("Config: ".scalar(p($conf)));
 	$previous_last_mod = $last_mod;
 	return $conf
 }
 
 $quit->recv;
-say 'told to quit...';
+$logger->info('told to quit...');
 

@@ -1,0 +1,15 @@
+---
+Tail:
+  id1:
+    filenames:
+      - /var/log/_your_sendmail_log_
+    next_objects:
+      - sendmail1
+SendmailParser:
+  sendmail1:
+    next_objects:
+      - redis1
+RedisPublisher:
+  redis1:
+    redis: _your_redis_server_
+    channel: logstash-sendmail

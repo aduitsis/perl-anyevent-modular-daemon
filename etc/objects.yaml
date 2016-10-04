@@ -1,8 +1,0 @@
----
-Tail:
-  id1:
-    filenames:
-      - /var/log/subscriber.log
-RedisPublisher:
-  id2: {}
-

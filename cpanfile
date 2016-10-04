@@ -6,3 +6,7 @@ requires 'YAML';
 requires 'Moose';
 requires 'AnyEvent::Filesys::Notify';
 requires 'Array::Utils';
+requires 'Redis';
+requires 'JSON';
+requires 'Sub::Install';
+requires 'Try::Tiny';

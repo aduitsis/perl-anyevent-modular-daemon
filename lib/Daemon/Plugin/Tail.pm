@@ -1,7 +1,8 @@
 package Daemon::Plugin::Tail;
 
 use v5.20;
-use feature 'postderef' ; no warnings 'experimental::postderef';
+use feature 'postderef' ;
+no warnings qw(experimental::postderef);
 use autodie;
 
 use Moose;
@@ -12,6 +13,8 @@ use File::Basename;
 use File::Spec;
 use Array::Utils qw(unique);
 use Fcntl;
+use Try::Tiny;
+use List::Util qw(any);
 
 with 'Daemon::Plugin';
 
@@ -34,14 +37,22 @@ has filehandles => (
 	default	=> sub { {} },
 );
 
+has retry_period => (
+	is	=> 'ro',
+	isa	=> 'Num',
+	default	=> 5,
+);
 
-sub filehandle {
-	open my $fh, '-|','tail -F -n0 -q '.$_[0]->filename;
-	return $fh
-}
+has retry_callback => (
+	is	=> 'ro',
+	isa	=> 'Maybe[Ref]', #maybe means undef is also acceptable
+	writer	=> '_set_retry_callback',
+);
+
 
 sub get_unique_directories {
-	#unique map { File::Spec->rel2abs( dirname( $_ ) ) } $_[0]->filenames->@*
+	# linux and freebsd are the same for the time being
+	# we are watching entire directories, which may not be optimal
 	if( $^O eq 'linux' ) {
 		return unique map { File::Spec->rel2abs( dirname( $_ ) ) } $_[0]->filenames->@*
 	}
@@ -54,23 +65,33 @@ sub get_unique_directories {
 	}
 }
 
+# this hash may as well be shared amongst all objects of this class
+# the keys are filenames and the values are the sizes of those files
+# so, no danger of messing the hash between different objects
 my %size;
 
 sub open_file {
-	my $self = shift // die 'incorrect call';
-	my $filename = shift // die 'incorrect call';
+	my $self =	shift // die 'incorrect call';
+	my $filename =	shift // die 'incorrect call';
 	my $fh;
-	if(-e $filename) {
-		$logger->debug("opening $filename");
-		open $fh,'<',$filename;
-		seek $fh,0,Fcntl::SEEK_END;#go to eof
-		$self->filehandles->{$filename} = $fh;
-		$size{ $filename } = (stat($fh))[7];
+	# if filename exists
+	try {
+		if(-e $filename) {
+			$self->debug("opening $filename");
+			open $fh,'<',$filename;
+			seek $fh,0,Fcntl::SEEK_END;#go to eof
+			$self->filehandles->{$filename} = $fh;
+			$size{ $filename } = file_size( $fh );
+		}
+		else {
+			$self->debug("$filename does not exist");
+			$self->filehandles->{$filename} = undef;
+		}
 	}
-	else {
-		$logger->debug("$filename does not exist");
-		$self->filehandles->{$filename} = undef
-	}
+	catch {
+		$self->warn("cannot open $filename: ".$_);
+		$self->filehandles->{$filename} = undef;
+	};
 }
 
 
@@ -78,40 +99,49 @@ sub close_file {
 	my $self = shift // die 'incorrect call';
 	my $filename = shift // die 'incorrect call';
 	if( defined( $self->filehandles->{$filename} ) ) {
-		$logger->debug("closing handle for $filename");
+		$self->debug("closing handle for $filename");
 		close $self->filehandles->{$filename};
 		$self->filehandles->{$filename} = undef
 	}
 	else {
-		$logger->debug("$filename was not open, nothing to do");
+		$self->debug("$filename was not open in the first place, nothing to do");
 	}
+	$self->BUILD;
+}
+
+sub file_size {
+	(stat($_[0]))[7]
 }
 
 sub read_file {
 	my $self = shift // die 'incorrect call';
 	my $filename = shift // die 'incorrect call';
 	my $fh = $self->filehandles->{$filename};
-	if(!defined($fh)) {
-		$logger->fatal("error! $filename attempt to read from undefined filehandle");
-		$self->close_file( $filename );
+	if( ! defined($fh) ) {
+		$self->fatal("error! attempt to read from undef filehandle for $filename");
 		return
 	}
 	else {
-		my $size = (stat($fh))[7];
-		$logger->debug("$filename is $size bytes");
+		my $size = file_size( $fh );
+		$self->trace("$filename is $size bytes");
+		# compare current with previous size
 		if( $size < $size{ $filename } ) {
-			$logger->debug("$filename truncated");
+			$self->debug("$filename truncated, size diminished");
 			seek $fh,0,Fcntl::SEEK_SET;#go to start of file
 		}
+		# now record current size
 		$size{ $filename } = $size;
+
+		# now read as many lines as possible
 		while( my $line = <$fh> ) {
 			if(!defined($line)){
-				$logger->debug("trying to read from $filename returned undef");
+				$self->trace("trying to read from $filename returned undef, eof probably reached");
 			}
 			else {
 				chomp($line);
-				$logger->debug("line read: $line");
-				$self->dispatch->('id2','receive',$line);
+				$self->trace("$filename read: $line");
+				# we have a line, send it to other objects
+				$self->send_to_next( $line );
 			}
 		}
 	}
@@ -123,8 +153,9 @@ sub handle_event {
 	my $event = shift // die 'incorrect call';
 	my $modified_file = $event->path;
 	my $type = $event->type;
-	if( exists $self->filehandles->{ $modified_file } ) { #exists and is defined
-		$logger->debug($event->type." event on $modified_file");
+	#if( exists $self->filehandles->{ $modified_file } ) { #exists and is defined
+	if( any { $_ eq $modified_file } $self->filenames->@* ) { #modified file is in our watchlist
+		$self->trace($event->type." event on $modified_file");
 		if( $type eq 'created' ) {
 			$self->open_file( $modified_file )
 		}
@@ -134,41 +165,61 @@ sub handle_event {
 		elsif( $type eq 'modified' ) {
 			$self->read_file( $modified_file )
 		}
+		else {
+			$self->fatal("Cannot handle an event of type $type for ".$modified_file);
+		}
 	}
 }
 
+sub retry_if_not_all_files_open {
+	my $self = shift // die 'incorrect call';
+	for my $filename ($self->filenames->@*) {
+		if ( ! defined( $self->filehandles->{ $filename } ) ) {
+			$self->debug("$filename is not open ... will retry in ".$self->retry_period);
+			$self->_set_retry_callback( 
+				AnyEvent->timer(
+					after	=> $self->retry_period,
+					cb	=> sub {
+						$self->BUILD
+					},
+				),
+			);
+			# if we have entered this loop, no need to try everything
+			return;
+		}
+	}
+	# if we have made it here without returning, we can reset the callback
+	$self->_set_retry_callback(undef);
+}
+
+			
+
 sub BUILD {
 	my $self = shift // die 'incorrect call';
-	my @dirs = $self->get_unique_directories;
-	$logger->info('Directories to watch: '.join(',',@dirs));
-	#open my $fh , '-|','tail -F -n0 -q /var/tmp/whatever.log';
-	#my $io = AnyEvent->io(
-	#		fh		=> $fh,
-	#		poll		=> 'r',
-	#		cb		=> sub {
-	#			$logger->debug("eof=".eof($fh));
-	#			chomp (my $input = <$fh>);
-	#			$logger->info($input)
-	#		},
-	#);
-	#$_[0]->_set_callback( $io );
 
+	# unique directories we must monitor
+	my @dirs = $self->get_unique_directories;
+	$self->info('initializing, files/dirs to watch: '.join(' ',@dirs));
+
+	# try to open all our filenames
 	for my $filename ($self->filenames->@*) {
+		next if defined $self->filehandles->{ $filename };
 		$self->open_file( $filename )
+		
 	}
 
-	p $self->filehandles;
-
-	my $notifier = AnyEvent::Filesys::Notify->new(
-		dirs     => \@dirs,
-		cb       => sub {
-			my (@events) = @_;
-			### p @events;
-			$self->handle_event( $_ ) for @events;
-		},
-		parse_events => 1,
+	 $self->_set_callback( 
+		AnyEvent::Filesys::Notify->new(
+			dirs     => \@dirs,
+			cb       => sub {
+				my (@events) = @_;
+				$self->handle_event( $_ ) for @events;
+			},
+			parse_events => 1,
+		)
 	);
-	$self->_set_callback( $notifier );
+	
+	$self->retry_if_not_all_files_open;
 }
 
 

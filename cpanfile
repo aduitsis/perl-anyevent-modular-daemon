@@ -10,3 +10,4 @@ requires 'Redis';
 requires 'JSON';
 requires 'Sub::Install';
 requires 'Try::Tiny';
+requires 'Proc::ProcessTable';

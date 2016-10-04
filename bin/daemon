@@ -22,6 +22,7 @@ use Scalar::Util;
 use Errno;
 use YAML qw(LoadFile);
 use Try::Tiny;
+use Data::Dumper;
 
 #get a logger
 Log::Log4perl::init_and_watch( File::Spec->catdir( $etc_dir , 'daemon.logger' ) );
@@ -99,7 +100,7 @@ sub load_config {
 		$logger->trace("file $conf_file unchanged");
 		return
 	}
-	$logger->info("change detected...reloading file $conf_file");
+	$logger->info("(re)loading file $conf_file");
 
 	my $conf = try { LoadFile($conf_file) } catch {
 		$logger->error("cannot YAML::LoadFile $conf_file: $_");
@@ -107,7 +108,7 @@ sub load_config {
 	};
 	$conf // return;
 
-	$logger->debug("Config: ".scalar(p($conf)));
+	$logger->trace("Config: ".scalar(Dumper($conf)));
 	$previous_last_mod = $last_mod;
 	return $conf
 }

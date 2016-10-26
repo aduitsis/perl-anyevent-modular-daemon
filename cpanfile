@@ -12,3 +12,4 @@ requires 'Sub::Install';
 requires 'Try::Tiny';
 requires 'Proc::ProcessTable';
 requires 'BSD::getloadavg';
+requires 'FreeBSD::FsStat';

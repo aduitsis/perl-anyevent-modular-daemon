@@ -144,6 +144,26 @@ sub read_file {
 				$self->send_to_next( $line );
 			}
 		}
+		# the file may also have been deleted
+		$self->detect_deletion( $filename )
+	}
+}
+
+sub detect_deletion {
+	my $self = shift // die 'incorrect call';
+	my $filename = shift // die 'incorrect call';
+	my $fh = $self->filehandles->{$filename};
+	# AnyEvent::FileSys::Notify with KQueue backend will erroneously report
+	# a file modification when the file has been rotated by newsyslog. The IO::KQueue
+	# correctly reports the deletion, but A:F:N does not detect it. This is because
+	# newsyslog will instantaneously replace the file, so, looking at the filesystem
+	# will not show that something is missing
+	use POSIX qw(fstat);
+	my ( $dev1, $ino1 ) = fstat( $fh );
+	my ( $dev2, $ino2 ) = stat( $filename );
+	if( ( $dev1 != $dev2 ) || ( $ino1 != $ino2 ) ) {
+		$self->debug("$filename deleted, inode number changed");
+		$self->close_file( $filename );
 	}
 }
 
@@ -168,6 +188,9 @@ sub handle_event {
 		else {
 			$self->fatal("Cannot handle an event of type $type for ".$modified_file);
 		}
+	}
+	else {
+		$self->trace("$modified_file not on our watchlist");
 	}
 }
 

@@ -95,7 +95,7 @@ sub parse_config {
 		my $package = 'Daemon::Plugin::'.$module;
 		load $package;
 		for my $id ( keys $conf->{ $module }->%* ) {
-			$logger->info("creating object $id");
+			$logger->info("creating object $id of class $package");
 			my $args = $conf->{ $module }->{ $id };
 			$args->{ dispatch } = \&dispatch;
 			$args->{ id } = $id;

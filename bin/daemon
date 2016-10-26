@@ -52,21 +52,40 @@ my $quiter = sub {
 	local $SIG{ INT  } = 'IGNORE';
 	$quit->send
 };
+
+my $reloader;
+
+sub arm_reloader {
+	$reloader = AnyEvent->condvar;
+	$reloader->cb( sub {
+		$logger->debug('calling conf_reload');
+		conf_reload();
+		$logger->debug('rearming');
+		arm_reloader()
+	});
+}
+
+arm_reloader();
+
 $SIG{ INT  } = $quiter;
 $SIG{ TERM } = $quiter;
+$SIG{ HUP } = sub {
+	$logger->info('received HUP signal');
+	$reloader->send
+};
 
 
 my $tick = AnyEvent->timer (
 	after => 0.1,
 	interval => $interval,
-	cb => sub {
-		$logger->trace('trying conf reload');
-		my $conf = load_config( $conf_file );
-		parse_config( $conf ) if defined($conf);
-	}
+	cb => \&conf_reload,
 );
 
-
+sub conf_reload {
+	$logger->trace('trying conf reload');
+	my $conf = load_config( $conf_file );
+	parse_config( $conf ) if defined($conf);
+}
 
 sub parse_config {
 	my $conf = shift // die 'incorrect call';

@@ -24,6 +24,10 @@ use YAML qw(LoadFile);
 use Try::Tiny;
 use Data::Dumper;
 
+use Getopt::Long;
+#lifted from https://perlancar.wordpress.com/2016/12/01/getopt-modules-01-getoptlong/
+Getopt::Long::Configure("bundling", "no_ignore_case", "permute", "no_getopt_compat"); 
+
 #get a logger
 Log::Log4perl::init_and_watch( File::Spec->catdir( $etc_dir , 'daemon.logger' ) );
 my $logger = Log::Log4perl->get_logger;

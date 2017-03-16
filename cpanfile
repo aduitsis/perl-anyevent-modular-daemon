@@ -13,3 +13,4 @@ requires 'Try::Tiny';
 requires 'Proc::ProcessTable';
 requires 'BSD::getloadavg';
 requires 'FreeBSD::FsStat';
+requires 'Log::Dispatch::FileRotate';

@@ -23,10 +23,31 @@ use Errno;
 use YAML qw(LoadFile);
 use Try::Tiny;
 use Data::Dumper;
+use autodie qw(chdir open close fork);
+use POSIX qw(setsid); # used for daemonize
 
 use Getopt::Long;
 #lifted from https://perlancar.wordpress.com/2016/12/01/getopt-modules-01-getoptlong/
 Getopt::Long::Configure("bundling", "no_ignore_case", "permute", "no_getopt_compat"); 
+
+GetOptions(
+	'd'	=> \(my $daemonize = 0),
+);
+
+# from http://perldoc.perl.org/perlipc.html#Complete-Dissociation-of-Child-from-Parent
+sub daemonize {
+	chdir("/")			|| die "can't chdir to /: $!";
+	open(STDIN,  '<', '/dev/null')	|| die "can't read /dev/null: $!";
+	open(STDOUT, '>', '/dev/null')	|| die "can't write to /dev/null: $!";
+	defined(my $pid = fork())	|| die "can't fork: $!";
+	exit if $pid;			# non-zero now means I am the parent
+	(setsid() != -1)		|| die "Can't start a new session: $!";
+	open(STDERR, '>&', \*STDOUT)	|| die "can't dup stdout: $!";
+}
+
+if( $daemonize ) {
+	daemonize;
+}
 
 #get a logger
 Log::Log4perl::init_and_watch( File::Spec->catdir( $etc_dir , 'daemon.logger' ) );

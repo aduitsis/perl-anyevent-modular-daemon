@@ -39,8 +39,14 @@ my $objects;
 sub dispatch {
 	my $id = shift // die 'missing id to dispatch message to';
 	my $function = shift // die 'empty function name to use as dispatcher';
+	my @rest = @_;
 	$logger->trace("sending $function message to $id");
-	$objects->{ $id }->$function( @_ );
+	try {
+		$objects->{ $id }->$function( @rest );
+	}
+	catch {
+		$logger->error("Method $function in object $id died. The error was: $_");
+	};
 }
 
 # quit condition variable

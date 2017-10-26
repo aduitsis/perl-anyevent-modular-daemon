@@ -99,24 +99,29 @@ sub arm_reloader {
 
 arm_reloader();
 
-$SIG{ INT  } = $quiter;
-$SIG{ TERM } = $quiter;
-$SIG{ HUP } = sub {
+$SIG{ INT  }	= $quiter;
+$SIG{ TERM }	= $quiter;
+$SIG{ HUP }	= sub {
 	$logger->info('received HUP signal');
 	$reloader->send
 };
 
 
 my $tick = AnyEvent->timer (
-	after => 0.1,
-	interval => $interval,
-	cb => \&conf_reload,
+	after		=> 0.1,
+	interval	=> $interval,
+	cb		=> \&conf_reload,
 );
 
 sub conf_reload {
 	$logger->trace('trying conf reload');
 	my $conf = load_config( $conf_file );
-	parse_config( $conf ) if defined($conf);
+	if defined($conf) {
+		parse_config( $conf )
+	}
+	else {
+		$logger->trace('parse_config returned undef')
+	}
 }
 
 sub parse_config {

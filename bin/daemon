@@ -35,6 +35,7 @@ GetOptions(
 );
 
 # from http://perldoc.perl.org/perlipc.html#Complete-Dissociation-of-Child-from-Parent
+# maybe there should be a double fork in order to prevent re-acquiring the terminal
 sub daemonize {
 	chdir("/")			|| die "can't chdir to /: $!";
 	open(STDIN,  '<', '/dev/null')	|| die "can't read /dev/null: $!";

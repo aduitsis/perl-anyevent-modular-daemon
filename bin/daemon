@@ -116,7 +116,7 @@ my $tick = AnyEvent->timer (
 sub conf_reload {
 	$logger->trace('trying conf reload');
 	my $conf = load_config( $conf_file );
-	if defined($conf) {
+	if ( defined($conf) ) {
 		parse_config( $conf )
 	}
 	else {

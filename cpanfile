@@ -1,3 +1,4 @@
+requires 'Module::Install';
 requires 'AnyEvent';
 requires 'Module::Find';
 requires 'Data::Printer';
@@ -14,3 +15,4 @@ requires 'Proc::ProcessTable';
 requires 'BSD::getloadavg';
 requires 'FreeBSD::FsStat';
 requires 'Log::Dispatch::FileRotate';
+requires 'Scalar::Util';

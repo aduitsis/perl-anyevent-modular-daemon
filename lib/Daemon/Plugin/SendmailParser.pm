@@ -61,6 +61,12 @@ sub parse_line {
 					$self->send_to_next( { host => $host , ip => $ip, nrcpts => $kv{nrcpts}, accept => ( $kv{nrcpts} != 0 )? 1 : 0 } );
 				}
 			}
+			elsif( exists( $kv{ to } ) ) {
+				$self->trace('TO:'.join(',',map { "$_=$kv{$_}" } sort keys %kv));
+			}
+			#else {
+			#	$self->info('ELSE:'.join(',',map { "$_=$kv{$_}" } sort keys %kv));
+			#}
                 }
 	}
 	return

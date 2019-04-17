@@ -1,5 +1,4 @@
-#log4perl.logger = DEBUG, Screen
-log4perl.logger = DEBUG, LogFile
+log4perl.logger = DEBUG, LogFile, Screen
 
 # standard error
 log4perl.appender.Screen				= Log::Log4perl::Appender::ScreenColoredLevels

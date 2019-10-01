@@ -67,12 +67,34 @@ sub dispatch {
 	my $function = shift // die 'empty function name to use as dispatcher';
 	my @rest = @_;
 	$logger->trace("sending $function message to $id");
+
+	my $object;
+	# make sure the object $id does exist
+	if( ! defined( $object = $objects->{ $id } ) ) { 
+		$logger->error("Cannot dispatch message '$function' to id $id, because does not exist!");
+		die
+	}
+		
+	my $re_init_object;
 	try {
-		$objects->{ $id }->$function( @rest );
+		$object->$function( @rest );
 	}
 	catch {
 		$logger->error("Method $function in object $id died. The error was: $_");
+		$re_init_object = 1 #if there was a problem, try to reinitialize the object
 	};
+	if( $re_init_object ) {
+		$logger->info("I will try to re-initialize object $id");
+		# TODO: review this code, we are calling a Moose-specific method
+		# which should conceivably re-initialize the object
+		# example, for SendmailParser, this BUILD() just calls init_redis()
+		try {
+			$object->BUILD;
+		}
+		catch {
+			$logger->error("Cannot reinitialize object $id, error was: $_")
+		}
+	}
 }
 
 # quit condition variable
@@ -124,22 +146,42 @@ sub conf_reload {
 	}
 }
 
+my $repeater;
+
 sub parse_config {
 	my $conf = shift // die 'incorrect call';
+	my $retry_soon = 0;
+	$repeater = undef;
 	$objects = {};
+	MODULES:
 	for my $module ( keys $conf->%* ){
-		$logger->debug("Module $module");
 		my $package = 'Daemon::Plugin::'.$module;
-		load $package;
+		$logger->debug("Loading module $package");
+		try {
+			load $package;
+		}
+		catch {
+			$logger->warn("Cannot load module $package. Objects of that type will not be able to exist until it is possible to load that module. Error was: ".$_);
+			$retry_soon = 1;
+			next MODULES;
+		};
 		for my $id ( keys $conf->{ $module }->%* ) {
-			$logger->info("creating object $id of class $package");
-			my $args = $conf->{ $module }->{ $id };
-			$args->{ dispatch } = \&dispatch;
-			$args->{ id } = $id;
-			my $obj = $package->new( $args );
-			$objects->{ $id } = $obj;
+			try {
+				$logger->info("creating object $id of class $package");
+				my $args = $conf->{ $module }->{ $id };
+				$args->{ dispatch } = \&dispatch;
+				$args->{ id } = $id;
+				my $obj = $package->new( $args );
+				$objects->{ $id } = $obj;
+			}
+			catch {
+				$logger->error("cannot create object $id, error was: $_");
+				$logger->info("arming full conf reload because object $id failed to init");
+				$reloader->send
+			}
 		}
 	}
+	$repeater = AnyEvent->timer( after => 1, interval => 1, cb => \&conf_reload ) if $retry_soon;
 }
 
 sub load_config {
